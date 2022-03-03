@@ -16,7 +16,6 @@
 
 package org.springframework.cloud.function.context.catalog.observability;
 
-import io.micrometer.api.instrument.docs.DocumentedObservation;
 import io.micrometer.api.instrument.observation.Observation;
 import io.micrometer.api.instrument.observation.ObservationRegistry;
 import org.apache.commons.logging.Log;

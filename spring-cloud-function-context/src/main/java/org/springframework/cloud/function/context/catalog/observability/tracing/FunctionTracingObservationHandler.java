@@ -103,6 +103,7 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 			if (log.isDebugEnabled()) {
 				log.debug("Will retrieve the tracing headers from the message");
 			}
+			// This will create a handle span
 			invocationMessage = wrapInputMessage(context, message);
 			if (log.isDebugEnabled()) {
 				log.debug("Wrapped input msg " + invocationMessage);
@@ -110,6 +111,7 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 			span = invocationMessage.childSpan;
 		}
 		context.put(MessageAndSpans.class, invocationMessage);
+		// This is the function span
 		getTracingContext(context).setSpan(span);
 	}
 
@@ -117,12 +119,15 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	public void onStop(FunctionContext context) {
 		MessageAndSpans invocationMessage = context.get(MessageAndSpans.class);
 		Span span = getRequiredSpan(context);
+		// Here we close the function span
+		span.name(context.getTargetFunction().getFunctionDefinition()).end();
 		Object result = context.getOutput();
 		Message<?> msgResult = toMessage(result);
 		MessageAndSpan wrappedOutputMessage;
 		if (log.isDebugEnabled()) {
 			log.debug("Will instrument the output message");
 		}
+		// Here we create the send span
 		if (invocationMessage != null) {
 			wrappedOutputMessage = wrapOutputMessage(msgResult, invocationMessage.parentSpan, context);
 		}
@@ -176,7 +181,7 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 		if (log.isDebugEnabled()) {
 			log.debug("Built a consumer span " + consumerSpan);
 		}
-		Span childSpan = consumerSpan.name(context.getContextualName());
+		Span childSpan = tracer.nextSpan(consumerSpan).name(context.getContextualName());
 		clearTracingHeaders(headers);
 		context.put(PARENT_SPAN_KEY, consumerSpan);
 		context.put(CHILD_SPAN_KEY, childSpan);
