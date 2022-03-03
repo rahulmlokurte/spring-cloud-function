@@ -145,6 +145,11 @@
 			<artifactId>micrometer-tracing-api</artifactId>
 			<optional>true</optional>
 		</dependency>
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-integration-test</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<dependencyManagement>

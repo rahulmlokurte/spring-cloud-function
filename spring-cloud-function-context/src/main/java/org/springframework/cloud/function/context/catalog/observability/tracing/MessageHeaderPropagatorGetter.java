@@ -38,7 +38,7 @@ import org.springframework.util.StringUtils;
  * @author Marcin Grzejszczak
  * @since 4.0.0
  */
-class MessageHeaderPropagatorGetter implements Propagator.Getter<MessageHeaderAccessor> {
+public class MessageHeaderPropagatorGetter implements Propagator.Getter<MessageHeaderAccessor> {
 
 	private static final Log log = LogFactory.getLog(MessageHeaderPropagatorGetter.class);
 

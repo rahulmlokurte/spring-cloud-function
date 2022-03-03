@@ -38,7 +38,7 @@ import org.springframework.util.LinkedMultiValueMap;
  * @author Marcin Grzejszczak
  * @since 4.0.0
  */
-class MessageHeaderPropagatorSetter implements Propagator.Setter<MessageHeaderAccessor> {
+public class MessageHeaderPropagatorSetter implements Propagator.Setter<MessageHeaderAccessor> {
 
 	private static final Log log = LogFactory.getLog(MessageHeaderPropagatorSetter.class);
 
