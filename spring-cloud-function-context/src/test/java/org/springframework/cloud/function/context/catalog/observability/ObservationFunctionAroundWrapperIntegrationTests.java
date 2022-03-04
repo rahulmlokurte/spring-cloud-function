@@ -32,12 +32,15 @@ import io.micrometer.tracing.exporter.FinishedSpan;
 import io.micrometer.tracing.propagation.Propagator;
 import io.micrometer.tracing.test.SampleTestRunner;
 import io.micrometer.tracing.test.reporter.BuildingBlocks;
+import io.micrometer.tracing.test.simple.SpanAssert;
 import io.micrometer.tracing.test.simple.SpansAssert;
 
 import org.springframework.cloud.function.context.FunctionRegistration;
 import org.springframework.cloud.function.context.catalog.FunctionTypeUtils;
 import org.springframework.cloud.function.context.catalog.SimpleFunctionRegistry;
 import org.springframework.cloud.function.context.catalog.observability.tracing.FunctionTracingObservationHandler;
+import org.springframework.cloud.function.context.catalog.observability.tracing.MessageHeaderPropagatorGetter;
+import org.springframework.cloud.function.context.catalog.observability.tracing.MessageHeaderPropagatorSetter;
 import org.springframework.cloud.function.context.config.JsonMessageConverter;
 import org.springframework.cloud.function.json.JacksonMapper;
 import org.springframework.core.convert.support.DefaultConversionService;
@@ -61,7 +64,7 @@ class ObservationFunctionAroundWrapperIntegrationTests extends SampleTestRunner 
 
 	@Override
 	public BiConsumer<BuildingBlocks, Deque<ObservationHandler>> customizeObservationHandlers() {
-		return (buildingBlocks, observationHandlers) -> observationHandlers.addFirst(new FunctionTracingObservationHandler(buildingBlocks.getTracer(), testPropagator(buildingBlocks.getTracer())));
+		return (buildingBlocks, observationHandlers) -> observationHandlers.addFirst(new FunctionTracingObservationHandler(buildingBlocks.getTracer(), testPropagator(buildingBlocks.getTracer()), new MessageHeaderPropagatorGetter(), new MessageHeaderPropagatorSetter()));
 	}
 
 	private Propagator testPropagator(Tracer tracer) {
@@ -106,10 +109,12 @@ class ObservationFunctionAroundWrapperIntegrationTests extends SampleTestRunner 
 
 		assertThat(result.getPayload()).isEqualTo("HELLO");
 		List<FinishedSpan> spans = bb.getFinishedSpans();
-		SpansAssert.assertThat(spans).hasSize(3);
-		assertThat(spans.get(0).getName()).isEqualTo("handle");
-		assertThat(spans.get(1).getName()).isEqualTo("greeter");
-		assertThat(spans.get(2).getName()).isEqualTo("send");
+		SpansAssert.assertThat(spans)
+			.haveSameTraceId()
+			.hasSize(3);
+		SpanAssert.assertThat(spans.get(0)).hasNameEqualTo("handle").isStarted();
+		SpanAssert.assertThat(spans.get(1)).hasNameEqualTo("greeter").isStarted();
+		SpanAssert.assertThat(spans.get(2)).hasNameEqualTo("send").isStarted();
 	}
 
 

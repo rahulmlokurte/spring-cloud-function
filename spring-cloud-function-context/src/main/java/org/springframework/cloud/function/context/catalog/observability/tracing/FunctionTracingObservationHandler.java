@@ -39,7 +39,7 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 
 /**
- * Context.
+ * Function Tracing Observation Handler.
  *
  * @author Marcin Grzejszczak
  * @since 4.0.0
@@ -68,10 +68,6 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	 */
 	private static final String REMOTE_SERVICE_NAME = "broker";
 
-	private static final String PARENT_SPAN_KEY = FunctionTracingObservationHandler.class.getName() + "_PARENT_SPAN";
-
-	private static final String CHILD_SPAN_KEY = FunctionTracingObservationHandler.class.getName() + "_CHILD_SPAN";
-
 	private final Tracer tracer;
 
 	private final Propagator propagator;
@@ -80,66 +76,62 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 
 	private final Propagator.Setter<MessageHeaderAccessor> setter;
 
-	public FunctionTracingObservationHandler(Tracer tracer, Propagator propagator) {
+	public FunctionTracingObservationHandler(Tracer tracer, Propagator propagator, MessageHeaderPropagatorGetter getter, MessageHeaderPropagatorSetter setter) {
 		this.tracer = tracer;
 		this.propagator = propagator;
-		this.getter = new MessageHeaderPropagatorGetter();
-		this.setter = new MessageHeaderPropagatorSetter();
+		this.getter = getter;
+		this.setter = setter;
 	}
 
 	@Override
 	public void onStart(FunctionContext context) {
 		Message<?> message = (Message<?>) context.getInput();
-		MessageAndSpans invocationMessage = null;
+		MessageAndSpans wrappedInputMessage = null;
 		SimpleFunctionRegistry.FunctionInvocationWrapper targetFunction = context.getTargetFunction();
-		Span span = null;
+		Span functionSpan = null;
 		if (message == null && targetFunction.isSupplier()) { // Supplier
 			if (log.isDebugEnabled()) {
 				log.debug("Creating a span for a supplier");
 			}
-			span = this.tracer.nextSpan();
+			functionSpan = this.tracer.nextSpan().start();
 		}
 		else {
 			if (log.isDebugEnabled()) {
 				log.debug("Will retrieve the tracing headers from the message");
 			}
 			// This will create a handle span
-			invocationMessage = wrapInputMessage(context, message);
+			wrappedInputMessage = wrapInputMessage(context, message);
 			if (log.isDebugEnabled()) {
-				log.debug("Wrapped input msg " + invocationMessage);
+				log.debug("Wrapped input msg " + wrappedInputMessage);
 			}
-			span = invocationMessage.childSpan;
+			functionSpan = wrappedInputMessage.childSpan;
 		}
-		context.put(MessageAndSpans.class, invocationMessage);
+		context.put(MessageAndSpans.class, wrappedInputMessage);
 		// This is the function span
-		getTracingContext(context).setSpan(span);
+		getTracingContext(context).setSpan(functionSpan);
 	}
 
 	@Override
 	public void onStop(FunctionContext context) {
 		MessageAndSpans invocationMessage = context.get(MessageAndSpans.class);
-		Span span = getRequiredSpan(context);
-		// Here we close the function span
-		span.name(context.getTargetFunction().getFunctionDefinition()).end();
+		Span functionSpan = getRequiredSpan(context);
+		functionSpan.name(context.getTargetFunction().getFunctionDefinition()).end();
 		Object result = context.getOutput();
 		Message<?> msgResult = toMessage(result);
 		MessageAndSpan wrappedOutputMessage;
 		if (log.isDebugEnabled()) {
 			log.debug("Will instrument the output message");
 		}
-		// Here we create the send span
 		if (invocationMessage != null) {
 			wrappedOutputMessage = wrapOutputMessage(msgResult, invocationMessage.parentSpan, context);
 		}
 		else {
-			wrappedOutputMessage = wrapOutputMessage(msgResult, span, context);
+			wrappedOutputMessage = wrapOutputMessage(msgResult, functionSpan, context);
 		}
 		if (log.isDebugEnabled()) {
 			log.debug("Wrapped output msg " + wrappedOutputMessage);
 		}
-		if (wrappedOutputMessage.span != null) {
-			wrappedOutputMessage.span.end();
-		}
+		wrappedOutputMessage.span.end();
 		context.setModifiedOutput(wrappedOutputMessage.msg);
 	}
 
@@ -177,23 +169,22 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	private MessageAndSpans wrapInputMessage(FunctionContext context, Message<?> message) {
 		MessageHeaderAccessor headers = mutableHeaderAccessor(message);
 		Span.Builder consumerSpanBuilder = this.propagator.extract(headers, this.getter);
-		Span consumerSpan = consumerSpan(context, consumerSpanBuilder);
+		Span handleSpan = consumerSpan(context, consumerSpanBuilder);
 		if (log.isDebugEnabled()) {
-			log.debug("Built a consumer span " + consumerSpan);
+			log.debug("Built a consumer span " + handleSpan);
 		}
-		Span childSpan = tracer.nextSpan(consumerSpan).name(context.getContextualName());
+		Span functionSpan = tracer.nextSpan(handleSpan).name(context.getContextualName()).start();
 		clearTracingHeaders(headers);
-		context.put(PARENT_SPAN_KEY, consumerSpan);
-		context.put(CHILD_SPAN_KEY, childSpan);
 		if (message instanceof ErrorMessage) {
 			return new MessageAndSpans(new ErrorMessage((Throwable) message.getPayload(), headers.getMessageHeaders()),
-				consumerSpan, childSpan);
+				handleSpan, functionSpan);
 		}
 		headers.setImmutable();
 		return new MessageAndSpans(new GenericMessage<>(message.getPayload(), headers.getMessageHeaders()),
-			consumerSpan, childSpan);
+			handleSpan, functionSpan);
 	}
 
+	// Handle span
 	private Span consumerSpan(FunctionContext context, Span.Builder consumerSpanBuilder) {
 		// TODO: Add this as a documented span
 		consumerSpanBuilder.kind(Span.Kind.CONSUMER).name("handle");
@@ -217,10 +208,7 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	}
 
 	private void clearTracingHeaders(MessageHeaderAccessor headers) {
-		List<String> keysToRemove = new ArrayList<>(this.propagator.fields());
-		keysToRemove.add(Span.class.getName());
-		keysToRemove.add("traceHandlerParentSpan");
-		MessageHeaderPropagatorSetter.removeAnyTraceHeaders(headers, keysToRemove);
+		MessageHeaderPropagatorSetter.removeAnyTraceHeaders(headers, this.propagator.fields());
 	}
 
 	/**
@@ -232,20 +220,19 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	private MessageAndSpan wrapOutputMessage(Message<?> message, Span parentSpan, FunctionContext context) {
 		Message<?> retrievedMessage = getMessage(message);
 		MessageHeaderAccessor headers = mutableHeaderAccessor(retrievedMessage);
-		Span.Builder span = tracer.spanBuilder().setParent(parentSpan.context());
+		Span.Builder sendSpanBuilder = tracer.spanBuilder().setParent(parentSpan.context());
 		clearTracingHeaders(headers);
-		Span producerSpan = createProducerSpan(context, headers, span);
-		this.propagator.inject(producerSpan.context(), headers, this.setter);
+		Span sendSpan = createProducerSpan(context, headers, sendSpanBuilder);
+		this.propagator.inject(sendSpan.context(), headers, this.setter);
 		if (log.isDebugEnabled()) {
-			log.debug("Created a new span output message " + span);
+			log.debug("Created a new span output message " + sendSpanBuilder);
 		}
-		return new MessageAndSpan(outputMessage(message, retrievedMessage, headers), producerSpan);
+		return new MessageAndSpan(outputMessage(message, retrievedMessage, headers), sendSpan);
 	}
 
 	private Message<?> getMessage(Message<?> message) {
 		Object payload = message.getPayload();
-		if (payload instanceof MessagingException) {
-			MessagingException e = (MessagingException) payload;
+		if (payload instanceof MessagingException e) {
 			Message<?> failedMessage = e.getFailedMessage();
 			return failedMessage != null ? failedMessage : message;
 		}
@@ -253,6 +240,7 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	}
 
 	private Span createProducerSpan(FunctionContext context, MessageHeaderAccessor headers, Span.Builder spanBuilder) {
+		// TODO: Add documented span for this
 		spanBuilder.kind(Span.Kind.PRODUCER).name("send").remoteServiceName(toRemoteServiceName(headers));
 		Span span = spanBuilder.start();
 		if (!span.isNoop()) {
@@ -276,9 +264,7 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	private Message<?> outputMessage(Message<?> originalMessage, Message<?> retrievedMessage,
 		MessageHeaderAccessor additionalHeaders) {
 		MessageHeaderAccessor headers = mutableHeaderAccessor(originalMessage);
-		clearTechnicalTracingHeaders(headers);
-		if (originalMessage instanceof ErrorMessage) {
-			ErrorMessage errorMessage = (ErrorMessage) originalMessage;
+		if (originalMessage instanceof ErrorMessage errorMessage) {
 			headers.copyHeaders(MessageHeaderPropagatorSetter.propagationHeaders(additionalHeaders.getMessageHeaders(),
 				this.propagator.fields()));
 			return new ErrorMessage(errorMessage.getPayload(), isWebSockets(headers) ? headers.getMessageHeaders()
@@ -292,11 +278,6 @@ public class FunctionTracingObservationHandler implements TracingObservationHand
 	private boolean isWebSockets(MessageHeaderAccessor headerAccessor) {
 		return headerAccessor.getMessageHeaders().containsKey("stompCommand")
 			|| headerAccessor.getMessageHeaders().containsKey("simpMessageType");
-	}
-
-	private void clearTechnicalTracingHeaders(MessageHeaderAccessor headers) {
-		MessageHeaderPropagatorSetter.removeAnyTraceHeaders(headers,
-			Arrays.asList(Span.class.getName(), "traceHandlerParentSpan"));
 	}
 
 	@Override
