@@ -16,11 +16,7 @@
 
 package org.springframework.cloud.function.context.catalog.observability.tracing;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
-import io.micrometer.api.instrument.observation.Observation;
+import io.micrometer.core.instrument.observation.Observation;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.handler.TracingObservationHandler;

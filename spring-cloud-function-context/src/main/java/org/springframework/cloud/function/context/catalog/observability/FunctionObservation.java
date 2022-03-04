@@ -16,13 +16,13 @@
 
 package org.springframework.cloud.function.context.catalog.observability;
 
-import io.micrometer.api.instrument.docs.DocumentedObservation;
-import io.micrometer.api.instrument.docs.TagKey;
+import io.micrometer.core.instrument.docs.DocumentedObservation;
+import io.micrometer.core.instrument.docs.TagKey;
 
 enum FunctionObservation implements DocumentedObservation {
 
 	/**
-	 * Observation created around a function execution
+	 * Observation created around a function execution.
 	 */
 	FUNCTION_OBSERVATION {
 		@Override
