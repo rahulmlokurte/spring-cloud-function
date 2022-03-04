@@ -61,24 +61,16 @@ public class ObservationFunctionAroundWrapper extends FunctionAroundWrapper impl
 	private Object nonReactorStream(Object message,
 		SimpleFunctionRegistry.FunctionInvocationWrapper targetFunction) {
 		FunctionContext context = new FunctionContext(targetFunction).withInput(message);
-		Observation observation = Observation
+		Object invocationMessage = context.getModifiedInput();
+		Object result = Observation
 			.createNotStarted(FunctionObservation.FUNCTION_OBSERVATION.getName(), context, this.observationRegistry)
 			.contextualName(FunctionObservation.FUNCTION_OBSERVATION.getContextualName())
 			.tagsProvider(this.tagsProvider)
-			.start();
-		Object invocationMessage = context.getModifiedInput();
-		Object result;
-		try (Observation.Scope ws = observation.openScope()) {
-			result = message == null ? targetFunction.get() : targetFunction.apply(invocationMessage);
-			context.setOutput(result);
-		}
-		catch (Exception e) {
-			observation.error(e);
-			throw e;
-		}
-		finally {
-			observation.stop();
-		}
+			.observe(() -> {
+				Object r = message == null ? targetFunction.get() : targetFunction.apply(invocationMessage);
+				context.setOutput(r);
+				return r;
+			});
 		if (result == null) {
 			if (log.isDebugEnabled()) {
 				log.debug("Returned message is null - we have a consumer");
